@@ -27,12 +27,21 @@ local function approaching(vehicle, center)
     return dot(GetEntityForwardVector(vehicle), normalize(delta)) >= Config.NpcTraffic.LookAheadDot, dist
 end
 
-local function emergency(vehicle)
-    return Config.Emergency.Enabled and GetVehicleClass(vehicle) == 18 and IsVehicleSirenOn(vehicle)
+-- Emergency preemption is tied to the actual emergency lightbar/strobe state,
+-- not merely the audible siren state. A Class 18 vehicle with its siren audio
+-- on but emergency lights off will NOT receive signal priority.
+local function emergencyLightsActive(vehicle)
+    if not Config.Emergency.Enabled or GetVehicleClass(vehicle) ~= 18 then return false end
+    if not Config.Emergency.RequireEmergencyLights then return true end
+    return GetVehicleSirenLights(vehicle) == true
+end
+
+function TrafficAI.isEmergency(vehicle)
+    return emergencyLightsActive(vehicle)
 end
 
 function TrafficAI.shouldStop(intersection, vehicle)
-    if emergency(vehicle) then return false end
+    if TrafficAI.isEmergency(vehicle) then return false end
     local phase = intersection.phase
     if not phase then return true end
     local a = axis(approach(intersection.center, GetEntityCoords(vehicle)))
@@ -41,16 +50,67 @@ function TrafficAI.shouldStop(intersection, vehicle)
     return true
 end
 
-local function stop(driver, vehicle)
-    SetDriveTaskDrivingStyle(driver, Config.NpcTraffic.DrivingStyle)
-    SetDriveTaskMaxCruiseSpeed(driver, Config.NpcTraffic.StopApproachSpeed)
-    TaskVehicleTempAction(driver, vehicle, Config.NpcTraffic.StopAction, Config.NpcTraffic.StopActionDuration)
+local function getShoulderPoint(vehicle, intersection)
+    local coords = GetEntityCoords(vehicle)
+    local forward = normalize(GetEntityForwardVector(vehicle))
+    local right = vector3(-forward.y, forward.x, 0.0)
+    local leftPoint = coords - right * Config.NpcTraffic.PullOver.ShoulderOffset
+    local rightPoint = coords + right * Config.NpcTraffic.PullOver.ShoulderOffset
+
+    -- Prefer the side that moves farther away from the intersection center.
+    -- This is a practical fallback for GTA's road graph when an explicit
+    -- shoulder node is not available.
+    local side = right
+    if distance(leftPoint, intersection.center) > distance(rightPoint, intersection.center) then
+        side = -right
+    end
+
+    local distToIntersection = distance(coords, intersection.center)
+    local ahead = math.min(Config.NpcTraffic.PullOver.MaxPullOverDistance, math.max(8.0, distToIntersection * 0.35))
+    local point = coords + forward * ahead + side * Config.NpcTraffic.PullOver.ShoulderOffset
+    return vector3(point.x, point.y, coords.z)
 end
 
-local function release(driver)
+local function pullOver(driver, vehicle, intersection, state)
+    if not Config.NpcTraffic.PullOver.Enabled then return false end
+    local now = GetGameTimer()
+    if state.pullOverPoint and now - (state.lastRepath or 0) < Config.NpcTraffic.PullOver.RepathInterval then return true end
+
+    state.pullOverPoint = getShoulderPoint(vehicle, intersection)
+    state.lastRepath = now
+
+    TaskVehicleDriveToCoord(
+        driver,
+        vehicle,
+        state.pullOverPoint.x,
+        state.pullOverPoint.y,
+        state.pullOverPoint.z,
+        Config.NpcTraffic.PullOver.PullOverSpeed,
+        0,
+        GetEntityModel(vehicle),
+        Config.NpcTraffic.DrivingStyle,
+        2.5,
+        5.0
+    )
+    state.pullingOver = true
+    return true
+end
+
+local function stopAtShoulder(driver, vehicle, state)
+    SetDriveTaskDrivingStyle(driver, Config.NpcTraffic.DrivingStyle)
+    SetDriveTaskMaxCruiseSpeed(driver, 0.5)
+    TaskVehicleTempAction(driver, vehicle, Config.NpcTraffic.StopAction, Config.NpcTraffic.StopActionDuration)
+    state.stopped = true
+end
+
+local function release(driver, vehicle, state)
+    ClearPedTasks(driver)
     SetDriveTaskDrivingStyle(driver, Config.NpcTraffic.DrivingStyle)
     SetDriveTaskMaxCruiseSpeed(driver, Config.NpcTraffic.ReleaseSpeed)
-    ClearPedTasks(driver)
+    state.stopped = false
+    state.pullingOver = false
+    state.pullOverPoint = nil
+    state.lastRepath = 0
 end
 
 local function process(intersection, vehicle)
@@ -58,13 +118,35 @@ local function process(intersection, vehicle)
     if not valid then return end
     local isApproaching, dist = approaching(vehicle, intersection.center)
     if not isApproaching then return end
+
     local state = TrafficAI.states[vehicle]
-    if not state then state = { stopped = false } TrafficAI.states[vehicle] = state end
+    if not state then
+        state = { stopped = false, pullingOver = false, pullOverPoint = nil, lastRepath = 0 }
+        TrafficAI.states[vehicle] = state
+    end
     state.lastSeen = GetGameTimer(); state.intersection = intersection.key; state.distance = dist
+
+    -- Emergency vehicles only bypass the controller while their emergency
+    -- lights are actually active.
+    if TrafficAI.isEmergency(vehicle) then
+        if state.stopped or state.pullingOver then release(driver, vehicle, state) end
+        return
+    end
+
     if TrafficAI.shouldStop(intersection, vehicle) then
-        stop(driver, vehicle); state.stopped = true
-    elseif state.stopped then
-        release(driver); state.stopped = false
+        if not state.pullingOver and not state.stopped then
+            if not pullOver(driver, vehicle, intersection, state) then
+                SetDriveTaskMaxCruiseSpeed(driver, Config.NpcTraffic.StopApproachSpeed)
+                TaskVehicleTempAction(driver, vehicle, Config.NpcTraffic.StopAction, Config.NpcTraffic.StopActionDuration)
+                state.stopped = true
+            end
+        elseif state.pullingOver and state.pullOverPoint then
+            if distance(GetEntityCoords(vehicle), state.pullOverPoint) <= Config.NpcTraffic.PullOver.ArrivalDistance then
+                stopAtShoulder(driver, vehicle, state)
+            end
+        end
+    elseif state.stopped or state.pullingOver then
+        release(driver, vehicle, state)
     end
 end
 

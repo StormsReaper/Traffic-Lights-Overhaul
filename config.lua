@@ -22,7 +22,9 @@ Config.Emergency = {
     HoldAfterClear = 2.0,
     MaxHold = 35.0,
     ScanInterval = 400,
+    -- Preemption is strictly tied to the emergency lighting system.
     RequireSiren = true,
+    RequireEmergencyLights = true,
     RequireEmergencyClass = true,
     Classes = { [18] = true }
 }
@@ -38,7 +40,19 @@ Config.NpcTraffic = {
     ReleaseSpeed = 16.0,
     DrivingStyle = 786603,
     StopAction = 6,
-    StopActionDuration = 900
+    StopActionDuration = 900,
+
+    -- Instead of stopping NPCs in their lane, the controller asks GTA's
+    -- driving AI to move toward the shoulder/road edge before holding them.
+    PullOver = {
+        Enabled = true,
+        ShoulderOffset = 3.0,
+        PullOverSpeed = 5.0,
+        MaxPullOverDistance = 35.0,
+        ArrivalDistance = 7.0,
+        ActionDuration = 1200,
+        RepathInterval = 900
+    }
 }
 
 Config.SignalModels = {

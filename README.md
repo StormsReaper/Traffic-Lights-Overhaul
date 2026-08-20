@@ -1,83 +1,42 @@
 # Traffic Lights Overhaul
 
-A FiveM traffic-signal controller designed around realistic U.S.-style intersection timing, NPC traffic control, adaptive timing, emergency preemption, pedestrian safety, and coordinated signals.
+A FiveM traffic-signal controller designed around realistic U.S.-style intersection timing, NPC traffic control, adaptive timing, emergency preemption, pedestrian safety, lane analysis, and coordinated signals.
 
-## v0.3.0 development build
+## v0.4.0-test
 
-### Signal controller
-- Automatic GTA traffic-light discovery and intersection grouping.
-- Deterministic green/yellow/all-red sequencing.
-- Safe yellow and all-red transitions.
-- Emergency preemption based on **emergency lights**, not merely vehicle class.
-- Optional siren requirement.
+This branch is now arranged as a **test build**. It is not a production release yet.
 
-### NPC traffic
-- Separate traffic-AI interception layer for NPC-driven vehicles.
-- Player vehicles are never intentionally overridden.
-- Red-signal traffic can be routed toward a roadside/shoulder point.
-- GTA road nodes are used when available to keep pull-over targets on drivable roads.
-- Vehicles are released back to normal GTA driving when permitted.
+### Installation
 
-### Adaptive traffic
-- Counts approaching NPC traffic by axis.
-- Tracks queue pressure and accumulated waiting time.
-- Uses configurable minimum/maximum green times.
-- Starvation protection prevents one direction from being ignored indefinitely.
-- Queue spacing and detection distances are configurable.
-
-### U.S.-style signal features
-- Protected/permissive turn configuration groundwork.
-- Right-on-red configuration.
-- Protected left-turn timing settings.
-- Pedestrian request/safety phase framework.
-- Configurable WALK and flashing DON'T WALK timing.
-
-### Time-of-day plans
-Time-of-day behavior is controlled by `Config.TimeOfDay.Enabled`.
-
-When `false`, the normal `Config.Normal` timings are used and no time-of-day flashing mode is applied.
-
-When `true`, separate Day, Evening, and Night plans can define:
-- Green duration
-- Yellow duration
-- All-red duration
-- Flashing operation
-- Flash interval
-
-The default Night plan is configured for flashing operation, but the entire feature is disabled by default so existing servers are not unexpectedly changed.
-
-### Coordinated intersections
-Nearby intersections can share a preferred signal axis to form the basis of green-wave corridors. Emergency preemption can break coordination when configured to do so.
-
-## Installation
-
-1. Put the resource in the server's resources directory.
+1. Put the resource in your server's `resources` directory.
 2. Add `ensure Traffic-Lights-Overhaul` to `server.cfg`.
-3. Restart the resource/server.
-4. Test with `/tlo_debug`.
+3. Restart the resource.
+4. Verify the console shows no Lua load errors.
+5. Drive near a normal signalized intersection.
 
-## Key configuration groups
+### Test/debug commands
 
-`config.lua` exposes the major tuning points:
+```text
+/tlo_debug
+```
+Toggles the main visualization.
 
-- `Config.Normal` — baseline signal timing.
-- `Config.Adaptive` — queue-based signal timing.
-- `Config.Queues` — queue spacing and holding limits.
-- `Config.Turns` — protected left/right-on-red behavior settings.
-- `Config.Pedestrians` — pedestrian request and clearance timing.
-- `Config.Emergency` — emergency detection, light/siren requirements, hold times.
-- `Config.Coordination` — corridor/green-wave behavior.
-- `Config.TimeOfDay` — optional Day/Evening/Night timing plans and flashing mode.
-- `Config.Safety` — all-red minimums and intersection safety rules.
-- `Config.NpcTraffic` — AI detection, driving style, pull-over and road-node behavior.
-- `Config.DebugOptions` — development diagnostics.
+```text
+/tlo_debug_options intersections
+/tlo_debug_options queues
+/tlo_debug_options emergency
+/tlo_debug_options pedestrian
+/tlo_debug_options coordination
+```
+Toggles individual diagnostic layers.
 
-## Recommended starting configuration
+### Recommended first-test configuration
 
-For a production server, start with:
+Keep these conservative settings for the first server test:
 
 ```lua
-Config.TimeOfDay.Enabled = false
+Config.Debug = false
+Config.LaneAnalysis.Enabled = true
 Config.Adaptive.Enabled = true
 Config.Queues.Enabled = true
 Config.Emergency.Enabled = true
@@ -86,34 +45,86 @@ Config.Emergency.RequireSiren = false
 Config.Coordination.Enabled = true
 Config.Pedestrians.Enabled = true
 Config.NpcTraffic.Enabled = true
+Config.TimeOfDay.Enabled = false
 ```
 
-Enable time-of-day plans only after testing the map's traffic-light models and intersection grouping.
+Time-of-day flashing is intentionally disabled during the first test. Enable it only after normal signal sequencing is confirmed.
 
-## Development roadmap
+### Test checklist
 
-### Completed in the current development build
-- [x] Signal discovery and intersection grouping
-- [x] Normal U.S.-style phase sequencing
-- [x] Emergency-light-based preemption
-- [x] NPC traffic interception
-- [x] Roadside/road-node pull-over behavior
-- [x] Adaptive queue pressure calculation
-- [x] Configurable queue management
-- [x] Time-of-day timing plans and optional flashing operation
-- [x] Coordinated intersection axis selection
-- [x] Pedestrian request/safety framework
-- [x] Protected-turn configuration framework
+#### 1. Basic signal operation
+- [ ] Signals are discovered near the player.
+- [ ] N/S and E/W phases alternate.
+- [ ] Green transitions to yellow before changing direction.
+- [ ] All-red clearance occurs between conflicting greens.
+- [ ] Leaving the area and returning does not create duplicate intersections.
 
-### Next refinement
-- Lane-level turn movement detection.
-- Dedicated physical left-turn signal-head detection.
-- Actual pedestrian signal object detection/control where map assets expose it.
-- More precise road-node lane selection for pull-over behavior.
-- Multi-intersection corridor definitions rather than proximity-only coordination.
-- Railroad crossing integration.
-- Admin UI/debug visualization.
+#### 2. NPC traffic
+- [ ] NPC vehicles approaching red signals are detected.
+- [ ] Player-controlled vehicles are not intentionally overridden.
+- [ ] NPCs do not stop after entering the intersection clear zone.
+- [ ] NPCs pull toward a roadside/road-node point when configured.
+- [ ] NPCs resume normal driving after their approach receives permission.
 
-## Important technical note
+#### 3. Emergency preemption
+- [ ] Class 18 vehicle with emergency lights OFF behaves as normal traffic.
+- [ ] Class 18 vehicle with emergency lights ON is detected.
+- [ ] Siren is not required with the default configuration.
+- [ ] The emergency approach receives priority.
+- [ ] Conflicting traffic receives a safe yellow/all-red transition.
+- [ ] The intersection resumes normal operation after the emergency clears.
 
-FiveM exposes GTA's vehicle AI through tasks rather than a single replaceable "traffic AI" API. This resource therefore uses a hybrid architecture: GTA retains navigation/pathfinding while Traffic Lights Overhaul controls intersection permission, stopping, queue behavior, and signal phases.
+#### 4. Adaptive timing
+- [ ] A busy approach accumulates queue pressure.
+- [ ] Green duration stays within configured minimum/maximum bounds.
+- [ ] An empty approach does not receive unnecessary long green time.
+- [ ] Starvation protection eventually serves a waiting approach.
+
+#### 5. Lane analyzer
+- [ ] `/tlo_debug` shows the active intersection.
+- [ ] NPCs show NORTH/SOUTH/EAST/WEST approach labels.
+- [ ] Vehicles receive LEFT/THROUGH/RIGHT movement estimates.
+- [ ] Queue ordering is visible with the queues debug option.
+- [ ] Movement estimates are treated as approximate, not guaranteed.
+
+#### 6. Pedestrians
+- [ ] A pedestrian near an active intersection creates a request.
+- [ ] Traffic is not held forever by a pedestrian request.
+- [ ] Clearance timing completes before conflicting traffic is released.
+
+#### 7. Coordination
+- [ ] Nearby intersections can select the same preferred axis.
+- [ ] Emergency preemption can break coordination.
+- [ ] Unrelated intersections are not synchronized when outside the configured corridor distance.
+
+#### 8. Time of day
+Keep disabled for the initial test. After normal operation is verified:
+
+```lua
+Config.TimeOfDay.Enabled = true
+```
+
+Then test Day, Evening, and Night separately. The Night plan can use flashing yellow/red behavior.
+
+## Key configuration groups
+
+- `Config.Normal` — baseline signal timing.
+- `Config.LaneAnalysis` — lane/movement detection tuning.
+- `Config.Adaptive` — queue-based signal timing.
+- `Config.Queues` — queue spacing and holding limits.
+- `Config.Turns` — protected left/right-on-red behavior settings.
+- `Config.Pedestrians` — pedestrian request and clearance timing.
+- `Config.Emergency` — emergency detection and light/siren requirements.
+- `Config.Coordination` — corridor/green-wave behavior.
+- `Config.TimeOfDay` — optional Day/Evening/Night timing plans.
+- `Config.Safety` — all-red and intersection safety rules.
+- `Config.NpcTraffic` — AI detection, driving style, pull-over and road-node behavior.
+- `Config.DebugOptions` — development diagnostics.
+
+## Architecture
+
+FiveM exposes GTA's vehicle AI through tasks rather than a single replaceable traffic-AI API. TLO therefore uses a hybrid architecture: GTA retains navigation/pathfinding while Traffic Lights Overhaul controls intersection permission, stopping, queue behavior, and signal phases.
+
+## Important limitation
+
+The lane analyzer and turn classification are heuristic. GTA's map does not provide a universal, clean lane-to-signal mapping for every intersection. Do not treat the current protected-turn/pedestrian/coordination frameworks as production-grade until they have been tested against the specific map and traffic-light assets used by the server.

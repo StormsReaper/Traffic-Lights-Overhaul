@@ -1,194 +1,128 @@
 local intersections = {}
 _G.TLOIntersections = intersections
-local lastScan = 0
-local lastEmergencyScan = 0
+local lastScan, lastEmergencyScan = 0, 0
+local SIGNAL_RED, SIGNAL_YELLOW, SIGNAL_GREEN = 1, 2, 0
 
-local SIGNAL_RED = 1
-local SIGNAL_YELLOW = 2
-local SIGNAL_GREEN = 0
-
-local function dbg(message) if Config.Debug then print(('[TLO] %s'):format(message)) end end
-local function distance(a, b) return #(a - b) end
-local function normalize(v) local len = #v; if len < 0.001 then return vector3(0.0, 0.0, 0.0) end; return v / len end
-local function dot(a, b) return a.x * b.x + a.y * b.y + a.z * b.z end
-local function axisForPosition(center, position)
-    local dx, dy = position.x - center.x, position.y - center.y
-    return math.abs(dy) >= math.abs(dx) and 'NS' or 'EW'
-end
-local function approachForPosition(center, position)
-    local dx, dy = position.x - center.x, position.y - center.y
-    if math.abs(dy) >= math.abs(dx) then return dy >= 0.0 and 'NORTH' or 'SOUTH' end
-    return dx >= 0.0 and 'EAST' or 'WEST'
-end
-local function intersectionKey(position) return ('%.0f:%.0f'):format(position.x / 10.0, position.y / 10.0) end
+local function distance(a,b) return #(a-b) end
+local function normalize(v) local len=#v; if len<0.001 then return vector3(0,0,0) end; return v/len end
+local function dot(a,b) return a.x*b.x+a.y*b.y+a.z*b.z end
+local function axisForPosition(c,p) return math.abs(p.y-c.y)>=math.abs(p.x-c.x) and 'NS' or 'EW' end
+local function approachForPosition(c,p) local dx,dy=p.x-c.x,p.y-c.y; if math.abs(dy)>=math.abs(dx) then return dy>=0 and 'NORTH' or 'SOUTH' end return dx>=0 and 'EAST' or 'WEST' end
+local function intersectionKey(p) return ('%.0f:%.0f'):format(p.x/10,p.y/10) end
 
 local function createIntersection(center)
-    local key = intersectionKey(center)
-    if intersections[key] then return intersections[key] end
-    local cycle = Config.Normal.Green * 2.0 + Config.Normal.Yellow * 2.0 + Config.Normal.AllRed * 2.0
-    intersections[key] = { key = key, center = center, heads = {}, emergency = nil, phase = nil, phaseStarted = GetGameTimer(), cycleOffset = math.abs(math.floor(center.x * 13.37 + center.y * 7.91)) % math.max(1, math.floor(cycle)) }
+    local key=intersectionKey(center); if intersections[key] then return intersections[key] end
+    local cycle=Config.Normal.Green*2+Config.Normal.Yellow*2+Config.Normal.AllRed*2
+    intersections[key]={key=key,center=center,heads={},emergency=nil,phase=nil,phaseStarted=GetGameTimer(),cycleOffset=math.abs(math.floor(center.x*13.37+center.y*7.91))%math.max(1,math.floor(cycle))}
     return intersections[key]
 end
 
 local function scanSignals()
-    local playerCoords, nearby = GetEntityCoords(PlayerPedId()), {}
-    for _, object in ipairs(GetGamePool('CObject')) do
-        if DoesEntityExist(object) then
-            local model = GetEntityModel(object)
-            for _, configuredModel in ipairs(Config.SignalModels) do
-                if model == joaat(configuredModel) then
-                    local coords = GetEntityCoords(object)
-                    if distance(playerCoords, coords) <= Config.IntersectionActivationRadius then nearby[#nearby + 1] = { entity = object, coords = coords } end
-                    break
-                end
+    local pc=GetEntityCoords(PlayerPedId()); local nearby={}
+    for _,o in ipairs(GetGamePool('CObject')) do
+        if DoesEntityExist(o) then
+            local model=GetEntityModel(o)
+            for _,m in ipairs(Config.SignalModels) do
+                if model==joaat(m) then local p=GetEntityCoords(o); if distance(pc,p)<=Config.IntersectionActivationRadius then nearby[#nearby+1]={entity=o,coords=p} end break end
             end
         end
     end
-    for _, signal in ipairs(nearby) do
-        local assigned, closest = nil, Config.IntersectionMergeDistance
-        for _, intersection in pairs(intersections) do
-            local d = distance(intersection.center, signal.coords)
-            if d < closest then closest, assigned = d, intersection end
-        end
-        if not assigned then assigned = createIntersection(signal.coords) end
-        local known = false
-        for _, head in ipairs(assigned.heads) do if head.entity == signal.entity then known = true break end end
-        if not known then
-            assigned.heads[#assigned.heads + 1] = { entity = signal.entity, axis = axisForPosition(assigned.center, signal.coords), approach = approachForPosition(assigned.center, signal.coords) }
-            dbg(('Discovered signal at %.1f %.1f %.1f'):format(signal.coords.x, signal.coords.y, signal.coords.z))
-        end
+    for _,s in ipairs(nearby) do
+        local assigned,closest=nil,Config.IntersectionMergeDistance
+        for _,i in pairs(intersections) do local d=distance(i.center,s.coords); if d<closest then closest,assigned=d,i end end
+        if not assigned then assigned=createIntersection(s.coords) end
+        local known=false; for _,h in ipairs(assigned.heads) do if h.entity==s.entity then known=true break end end
+        if not known then assigned.heads[#assigned.heads+1]={entity=s.entity,axis=axisForPosition(assigned.center,s.coords),approach=approachForPosition(assigned.center,s.coords)} end
     end
-    for key, intersection in pairs(intersections) do
-        for i = #intersection.heads, 1, -1 do if not DoesEntityExist(intersection.heads[i].entity) then table.remove(intersection.heads, i) end end
-        if #intersection.heads == 0 then intersections[key] = nil end
-    end
+    for key,i in pairs(intersections) do for n=#i.heads,1,-1 do if not DoesEntityExist(i.heads[n].entity) then table.remove(i.heads,n) end end; if #i.heads==0 then intersections[key]=nil end end
 end
 
--- Emergency signal preemption requires the actual emergency lightbar/strobe
--- state. Siren audio alone is deliberately NOT enough.
-local function emergencyLightsActive(vehicle)
-    if not Config.Emergency.Enabled or GetVehicleClass(vehicle) ~= 18 then return false end
-    if not Config.Emergency.RequireEmergencyLights then return true end
-    return GetVehicleSirenLights(vehicle) == true
-end
-
-local function isEmergencyVehicle(vehicle)
-    return GetVehicleClass(vehicle) == 18 and (not Config.Emergency.RequireEmergencyClass or Config.Emergency.Classes[18] == true) and emergencyLightsActive(vehicle)
+local function emergencyLightsActive(v)
+    if not Config.Emergency.Enabled or GetVehicleClass(v)~=18 then return false end
+    if Config.Emergency.RequireEmergencyLights and GetVehicleSirenLights(v)~=true then return false end
+    if Config.Emergency.RequireSiren and not IsVehicleSirenOn(v) then return false end
+    return true
 end
 
 local function getEmergencyCandidates(center)
-    local candidates = {}
-    for _, vehicle in ipairs(GetGamePool('CVehicle')) do
-        if DoesEntityExist(vehicle) and isEmergencyVehicle(vehicle) then
-            local driver = GetPedInVehicleSeat(vehicle, -1)
-            if driver ~= 0 and DoesEntityExist(driver) then
-                local vehicleCoords = GetEntityCoords(vehicle)
-                local delta = center - vehicleCoords
-                local dist, speed = #delta, GetEntitySpeed(vehicle)
-                if dist <= Config.Emergency.DetectionRadius and speed >= Config.Emergency.MinimumSpeed then
-                    local approachDot = dot(GetEntityForwardVector(vehicle), normalize(delta))
-                    if approachDot >= Config.Emergency.LookAheadDot then
-                        candidates[#candidates + 1] = { vehicle = vehicle, distance = dist, speed = speed, eta = dist / math.max(speed, 0.1), approach = approachForPosition(center, vehicleCoords), axis = axisForPosition(center, vehicleCoords) }
-                    end
-                end
+    local c={}
+    for _,v in ipairs(GetGamePool('CVehicle')) do
+        if DoesEntityExist(v) and emergencyLightsActive(v) then
+            local d=GetPedInVehicleSeat(v,-1)
+            if d~=0 and DoesEntityExist(d) then
+                local p=GetEntityCoords(v); local delta=center-p; local distv=#delta; local speed=GetEntitySpeed(v)
+                if distv<=Config.Emergency.DetectionRadius and speed>=Config.Emergency.MinimumSpeed and dot(GetEntityForwardVector(v),normalize(delta))>=Config.Emergency.LookAheadDot then c[#c+1]={vehicle=v,distance=distv,speed=speed,eta=distv/math.max(speed,.1),approach=approachForPosition(center,p),axis=axisForPosition(center,p)} end
             end
         end
     end
-    table.sort(candidates, function(a, b) return a.eta < b.eta end)
-    return candidates
+    table.sort(c,function(a,b)return a.eta<b.eta end); return c
 end
 
 local function updateEmergencyState()
     if not Config.Emergency.Enabled then return end
-    local now = GetGameTimer()
-    if now - lastEmergencyScan < Config.Emergency.ScanInterval then return end
-    lastEmergencyScan = now
-    for _, intersection in pairs(intersections) do
-        local selected = getEmergencyCandidates(intersection.center)[1]
-        if selected then
-            intersection.emergency = { vehicle = selected.vehicle, approach = selected.approach, axis = selected.axis, distance = selected.distance, eta = selected.eta, lastSeen = now, started = intersection.emergency and intersection.emergency.started or now }
-        elseif intersection.emergency and (now - intersection.emergency.lastSeen) / 1000.0 > Config.Emergency.HoldAfterClear then
-            dbg(('Emergency cleared at %s'):format(intersection.key)); intersection.emergency = nil
-        end
+    local now=GetGameTimer(); if now-lastEmergencyScan<Config.Emergency.ScanInterval then return end; lastEmergencyScan=now
+    for _,i in pairs(intersections) do
+        local e=getEmergencyCandidates(i.center)[1]
+        if e then i.emergency={vehicle=e.vehicle,approach=e.approach,axis=e.axis,distance=e.distance,eta=e.eta,lastSeen=now,started=i.emergency and i.emergency.started or now}
+        elseif i.emergency and (now-i.emergency.lastSeen)/1000>Config.Emergency.HoldAfterClear then i.emergency=nil end
     end
 end
 
-local function normalPhase(intersection)
-    local cycle = Config.Normal.Green * 2.0 + Config.Normal.Yellow * 2.0 + Config.Normal.AllRed * 2.0
-    local t = (GetNetworkTimeAccurate() / 1000.0 + intersection.cycleOffset) % cycle
-    local a = Config.Normal.Green; local b = a + Config.Normal.Yellow; local c = b + Config.Normal.AllRed; local d = c + Config.Normal.Green; local e = d + Config.Normal.Yellow; local f = e + Config.Normal.AllRed
-    if t < a then return 'NS_GREEN' elseif t < b then return 'NS_YELLOW' elseif t < c then return 'ALL_RED' elseif t < d then return 'EW_GREEN' elseif t < e then return 'EW_YELLOW' elseif t < f then return 'ALL_RED' end
-    return 'NS_GREEN'
+local function normalPhase(i)
+    local green,yellow,allred=Config.Normal.Green,Config.Normal.Yellow,Config.Normal.AllRed
+    if _G.TLOFeatures then green,yellow,allred=_G.TLOFeatures.timings() end
+    local cycle=green*2+yellow*2+allred*2; local t=(GetNetworkTimeAccurate()/1000+i.cycleOffset)%cycle
+    local a=green; local b=a+yellow; local c=b+allred; local d=c+green; local e=d+yellow; local f=e+allred
+    if t<a then return 'NS_GREEN' elseif t<b then return 'NS_YELLOW' elseif t<c then return 'ALL_RED' elseif t<d then return 'EW_GREEN' elseif t<e then return 'EW_YELLOW' elseif t<f then return 'ALL_RED' end return 'NS_GREEN'
 end
-local function phaseAxis(phase)
-    if phase == 'NS_GREEN' or phase == 'NS_YELLOW' then return 'NS' end
-    if phase == 'EW_GREEN' or phase == 'EW_YELLOW' then return 'EW' end
-end
-local function phaseIsGreen(phase) return phase == 'NS_GREEN' or phase == 'EW_GREEN' end
-local function desiredPhase(intersection)
-    if intersection.emergency then
-        if (GetGameTimer() - intersection.emergency.started) / 1000.0 <= Config.Emergency.MaxHold then return intersection.emergency.axis == 'NS' and 'NS_GREEN' or 'EW_GREEN' end
-        intersection.emergency = nil
-    end
-    return normalPhase(intersection)
+local function phaseAxis(p) if p=='NS_GREEN' or p=='NS_YELLOW' then return 'NS' elseif p=='EW_GREEN' or p=='EW_YELLOW' then return 'EW' end end
+local function phaseIsGreen(p) return p=='NS_GREEN' or p=='EW_GREEN' end
+local function desiredPhase(i)
+    if i.emergency and (GetGameTimer()-i.emergency.started)/1000<=Config.Emergency.MaxHold then return i.emergency.axis=='NS' and 'NS_GREEN' or 'EW_GREEN' end
+    if _G.TLOFeatures then return _G.TLOFeatures.desiredPhase(i,normalPhase(i)) end
+    return normalPhase(i)
 end
 
-local function applyPhase(intersection, phase)
-    for _, head in ipairs(intersection.heads) do
-        if DoesEntityExist(head.entity) then
-            local state = SIGNAL_RED
-            if phase == 'NS_GREEN' and head.axis == 'NS' then state = SIGNAL_GREEN elseif phase == 'NS_YELLOW' and head.axis == 'NS' then state = SIGNAL_YELLOW elseif phase == 'EW_GREEN' and head.axis == 'EW' then state = SIGNAL_GREEN elseif phase == 'EW_YELLOW' and head.axis == 'EW' then state = SIGNAL_YELLOW end
-            SetEntityTrafficlightOverride(head.entity, state)
-        end
-    end
+local function applyPhase(i,p)
+    if _G.TLOFeatures and _G.TLOFeatures.applySpecial(i) then return end
+    for _,h in ipairs(i.heads) do if DoesEntityExist(h.entity) then local s=SIGNAL_RED; if p=='NS_GREEN' and h.axis=='NS' then s=SIGNAL_GREEN elseif p=='NS_YELLOW' and h.axis=='NS' then s=SIGNAL_YELLOW elseif p=='EW_GREEN' and h.axis=='EW' then s=SIGNAL_GREEN elseif p=='EW_YELLOW' and h.axis=='EW' then s=SIGNAL_YELLOW end SetEntityTrafficlightOverride(h.entity,s) end end
 end
 
-local function beginTransition(intersection, target)
-    local current = intersection.phase
-    if not current then intersection.phase, intersection.phaseStarted = target, GetGameTimer(); return end
-    if current == target then return end
-    local now = GetGameTimer()
-    if phaseIsGreen(current) and phaseAxis(current) ~= phaseAxis(target) then intersection.phase, intersection.phaseStarted = phaseAxis(current) == 'NS' and 'NS_YELLOW' or 'EW_YELLOW', now
-    elseif current == 'NS_YELLOW' or current == 'EW_YELLOW' then intersection.phase, intersection.phaseStarted = 'ALL_RED', now
-    elseif current == 'ALL_RED' then intersection.phase, intersection.phaseStarted = target, now
-    else intersection.phase, intersection.phaseStarted = target, now end
+local function transition(i,target)
+    local current=i.phase; local now=GetGameTimer(); if not current then i.phase,i.phaseStarted=target,now; return end; if current==target then return end
+    if phaseIsGreen(current) and phaseAxis(current)~=phaseAxis(target) then i.phase,i.phaseStarted=phaseAxis(current)=='NS' and 'NS_YELLOW' or 'EW_YELLOW',now
+    elseif current=='NS_YELLOW' or current=='EW_YELLOW' then i.phase,i.phaseStarted='ALL_RED',now
+    elseif current=='ALL_RED' then i.phase,i.phaseStarted=target,now else i.phase,i.phaseStarted=target,now end
 end
 
-local function advancePhase(intersection)
-    local now = GetGameTimer(); local elapsed = (now - intersection.phaseStarted) / 1000.0; local phase, desired = intersection.phase, desiredPhase(intersection)
-    if (phase == 'NS_YELLOW' or phase == 'EW_YELLOW') and elapsed >= Config.Normal.Yellow then intersection.phase, intersection.phaseStarted = 'ALL_RED', now; return end
-    if phase == 'ALL_RED' and elapsed >= Config.Normal.AllRed then intersection.phase, intersection.phaseStarted = desired, now; return end
-    if intersection.emergency then
-        if phaseIsGreen(phase) and phaseAxis(phase) == phaseAxis(desired) then return end
-        beginTransition(intersection, desired)
-    elseif desired ~= phase then beginTransition(intersection, desired) end
+local function advance(i)
+    local now=GetGameTimer(); local elapsed=(now-i.phaseStarted)/1000; local p=i.phase; local target=desiredPhase(i)
+    local duration=Config.Normal.AllRed; if _G.TLOFeatures then duration=_G.TLOFeatures.phaseDuration(p) else if p=='NS_GREEN' or p=='EW_GREEN' then duration=Config.Normal.Green elseif p=='NS_YELLOW' or p=='EW_YELLOW' then duration=Config.Normal.Yellow end end
+    if p=='FLASHING' then return end
+    if elapsed>=duration then
+        if p=='NS_YELLOW' or p=='EW_YELLOW' then i.phase,i.phaseStarted='ALL_RED',now
+        elseif p=='ALL_RED' then i.phase,i.phaseStarted=target,now
+        else transition(i,target) end
+    elseif i.emergency and phaseIsGreen(p) and phaseAxis(p)~=phaseAxis(target) then transition(i,target) end
 end
 
-local function drawDebug(intersection)
-    if not Config.Debug then return end
-    local text = ('TLO | %s | heads=%d'):format(intersection.phase or 'NONE', #intersection.heads)
-    if intersection.emergency then text = ('%s | EMERGENCY %s ETA %.1fs'):format(text, intersection.emergency.approach, intersection.emergency.eta or 0.0) end
-    SetDrawOrigin(intersection.center.x, intersection.center.y, intersection.center.z + 3.0, 0); SetTextScale(0.28, 0.28); SetTextFont(4); SetTextCentre(true); SetTextEntry('STRING'); AddTextComponentString(text); DrawText(0.0, 0.0); ClearDrawOrigin()
-end
+local function pedestrianUpdate(i) if _G.TLOFeatures then _G.TLOFeatures.updatePedestrians(i) end end
 
 CreateThread(function()
     while true do
-        local wait = Config.ScanInterval; local playerCoords = GetEntityCoords(PlayerPedId())
-        if GetGameTimer() - lastScan >= Config.ScanInterval then lastScan = GetGameTimer(); scanSignals() end
+        local wait=Config.ScanInterval; local pc=GetEntityCoords(PlayerPedId())
+        if GetGameTimer()-lastScan>=Config.ScanInterval then lastScan=GetGameTimer(); scanSignals() end
         updateEmergencyState()
-        for _, intersection in pairs(intersections) do
-            if distance(playerCoords, intersection.center) <= Config.IntersectionActivationRadius then
-                if not intersection.phase then intersection.phase, intersection.phaseStarted = desiredPhase(intersection), GetGameTimer() end
-                advancePhase(intersection); applyPhase(intersection, intersection.phase); drawDebug(intersection); wait = math.min(wait, Config.SignalUpdateInterval)
+        for _,i in pairs(intersections) do
+            if distance(pc,i.center)<=Config.IntersectionActivationRadius then
+                pedestrianUpdate(i)
+                if not i.phase then i.phase,i.phaseStarted=desiredPhase(i),GetGameTimer() end
+                advance(i); applyPhase(i,i.phase); wait=math.min(wait,Config.SignalUpdateInterval)
             end
         end
         Wait(wait)
     end
 end)
 
-AddEventHandler('onResourceStop', function(resourceName)
-    if resourceName ~= GetCurrentResourceName() then return end
-    for _, intersection in pairs(intersections) do for _, head in ipairs(intersection.heads) do if DoesEntityExist(head.entity) then SetEntityTrafficlightOverride(head.entity, 3) end end end
-end)
-
-RegisterCommand('tlo_debug', function() Config.Debug = not Config.Debug; print(('[TLO] Debug mode: %s'):format(Config.Debug and 'ON' or 'OFF')) end, false)
+AddEventHandler('onResourceStop',function(r) if r~=GetCurrentResourceName() then return end for _,i in pairs(intersections) do for _,h in ipairs(i.heads) do if DoesEntityExist(h.entity) then SetEntityTrafficlightOverride(h.entity,3) end end end end)
+RegisterCommand('tlo_debug',function() Config.Debug=not Config.Debug; print(('[TLO] Debug: %s'):format(Config.Debug and 'ON' or 'OFF')) end,false)

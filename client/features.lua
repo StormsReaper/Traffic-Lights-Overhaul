@@ -3,7 +3,6 @@ Features.state = {}
 local SIGNAL_RED, SIGNAL_YELLOW = 1, 2
 local function dist(a,b) return #(a-b) end
 local function axis(center,p) return math.abs(p.y-center.y)>=math.abs(p.x-center.x) and 'NS' or 'EW' end
-
 function Features.period()
     if not Config.TimeOfDay.Enabled then return Config.TimeOfDay.Day end
     local h=GetClockHours()
@@ -13,7 +12,6 @@ function Features.period()
 end
 function Features.timings() local p=Features.period(); return p.Green,p.Yellow,p.AllRed end
 function Features.isFlashing() return Config.TimeOfDay.Enabled and Features.period().Flashing==true end
-
 local function vehiclesFor(i)
     local r={NS={},EW={}}
     for _,v in ipairs(GetGamePool('CVehicle')) do
@@ -21,7 +19,6 @@ local function vehiclesFor(i)
     end
     table.sort(r.NS,function(a,b)return a.distance<b.distance end); table.sort(r.EW,function(a,b)return a.distance<b.distance end); return r
 end
-
 function Features.update(i)
     local s=Features.state[i.key]
     if not s then s={waitNS=0,waitEW=0,last=0,ped=nil,nextAxis=nil,coordAxis=nil}; Features.state[i.key]=s end
@@ -35,7 +32,6 @@ function Features.update(i)
     if _G.TLOCoordination then _G.TLOCoordination.update(i); s.coordAxis=i.coordination and i.coordination.axis or nil end
     return s
 end
-
 function Features.desiredPhase(i,fallback)
     local s=Features.update(i)
     if i.emergency then return i.emergency.axis=='NS' and 'NS_GREEN' or 'EW_GREEN' end
@@ -53,6 +49,7 @@ function Features.phaseDuration(p)
     return .8
 end
 function Features.applySpecial(i)
+    if i.emergency then return false end
     if not Features.isFlashing() then return false end
     local on=math.floor(GetGameTimer()/Config.TimeOfDay.FlashInterval)%2==0
     for _,h in ipairs(i.heads) do if DoesEntityExist(h.entity) then SetEntityTrafficlightOverride(h.entity,h.axis=='NS' and (on and SIGNAL_YELLOW or SIGNAL_RED) or (on and SIGNAL_RED or SIGNAL_YELLOW)) end end

@@ -2,40 +2,25 @@ local intersections = {}
 _G.TLOIntersections = intersections
 local lastScan = 0
 local lastEmergencyScan = 0
-local lastControlScan = 0
 
 local SIGNAL_RED = 1
 local SIGNAL_YELLOW = 2
 local SIGNAL_GREEN = 0
 
-local function dbg(message)
-    if Config.Debug then print(('[TLO] %s'):format(message)) end
-end
-
+local function dbg(message) if Config.Debug then print(('[TLO] %s'):format(message)) end end
 local function distance(a, b) return #(a - b) end
-
-local function normalize(v)
-    local len = #v
-    if len < 0.001 then return vector3(0.0, 0.0, 0.0) end
-    return v / len
-end
-
+local function normalize(v) local len = #v; if len < 0.001 then return vector3(0.0, 0.0, 0.0) end; return v / len end
 local function dot(a, b) return a.x * b.x + a.y * b.y + a.z * b.z end
-
 local function axisForPosition(center, position)
     local dx, dy = position.x - center.x, position.y - center.y
     return math.abs(dy) >= math.abs(dx) and 'NS' or 'EW'
 end
-
 local function approachForPosition(center, position)
     local dx, dy = position.x - center.x, position.y - center.y
     if math.abs(dy) >= math.abs(dx) then return dy >= 0.0 and 'NORTH' or 'SOUTH' end
     return dx >= 0.0 and 'EAST' or 'WEST'
 end
-
-local function intersectionKey(position)
-    return ('%.0f:%.0f'):format(position.x / 10.0, position.y / 10.0)
-end
+local function intersectionKey(position) return ('%.0f:%.0f'):format(position.x / 10.0, position.y / 10.0) end
 
 local function createIntersection(center)
     local key = intersectionKey(center)
@@ -79,8 +64,16 @@ local function scanSignals()
     end
 end
 
+-- Emergency signal preemption requires the actual emergency lightbar/strobe
+-- state. Siren audio alone is deliberately NOT enough.
+local function emergencyLightsActive(vehicle)
+    if not Config.Emergency.Enabled or GetVehicleClass(vehicle) ~= 18 then return false end
+    if not Config.Emergency.RequireEmergencyLights then return true end
+    return GetVehicleSirenLights(vehicle) == true
+end
+
 local function isEmergencyVehicle(vehicle)
-    return GetVehicleClass(vehicle) == 18 and (not Config.Emergency.RequireEmergencyClass or Config.Emergency.Classes[18] == true)
+    return GetVehicleClass(vehicle) == 18 and (not Config.Emergency.RequireEmergencyClass or Config.Emergency.Classes[18] == true) and emergencyLightsActive(vehicle)
 end
 
 local function getEmergencyCandidates(center)
@@ -89,13 +82,13 @@ local function getEmergencyCandidates(center)
         if DoesEntityExist(vehicle) and isEmergencyVehicle(vehicle) then
             local driver = GetPedInVehicleSeat(vehicle, -1)
             if driver ~= 0 and DoesEntityExist(driver) then
-                if not Config.Emergency.RequireSiren or IsVehicleSirenOn(vehicle) then
-                    local vehicleCoords = GetEntityCoords(vehicle)
-                    local delta = center - vehicleCoords
-                    local dist, speed = #delta, GetEntitySpeed(vehicle)
-                    if dist <= Config.Emergency.DetectionRadius and speed >= Config.Emergency.MinimumSpeed then
-                        local approachDot = dot(GetEntityForwardVector(vehicle), normalize(delta))
-                        if approachDot >= Config.Emergency.LookAheadDot then candidates[#candidates + 1] = { vehicle = vehicle, distance = dist, speed = speed, eta = dist / math.max(speed, 0.1), approach = approachForPosition(center, vehicleCoords), axis = axisForPosition(center, vehicleCoords) } end
+                local vehicleCoords = GetEntityCoords(vehicle)
+                local delta = center - vehicleCoords
+                local dist, speed = #delta, GetEntitySpeed(vehicle)
+                if dist <= Config.Emergency.DetectionRadius and speed >= Config.Emergency.MinimumSpeed then
+                    local approachDot = dot(GetEntityForwardVector(vehicle), normalize(delta))
+                    if approachDot >= Config.Emergency.LookAheadDot then
+                        candidates[#candidates + 1] = { vehicle = vehicle, distance = dist, speed = speed, eta = dist / math.max(speed, 0.1), approach = approachForPosition(center, vehicleCoords), axis = axisForPosition(center, vehicleCoords) }
                     end
                 end
             end
@@ -127,14 +120,11 @@ local function normalPhase(intersection)
     if t < a then return 'NS_GREEN' elseif t < b then return 'NS_YELLOW' elseif t < c then return 'ALL_RED' elseif t < d then return 'EW_GREEN' elseif t < e then return 'EW_YELLOW' elseif t < f then return 'ALL_RED' end
     return 'NS_GREEN'
 end
-
 local function phaseAxis(phase)
     if phase == 'NS_GREEN' or phase == 'NS_YELLOW' then return 'NS' end
     if phase == 'EW_GREEN' or phase == 'EW_YELLOW' then return 'EW' end
 end
-
 local function phaseIsGreen(phase) return phase == 'NS_GREEN' or phase == 'EW_GREEN' end
-
 local function desiredPhase(intersection)
     if intersection.emergency then
         if (GetGameTimer() - intersection.emergency.started) / 1000.0 <= Config.Emergency.MaxHold then return intersection.emergency.axis == 'NS' and 'NS_GREEN' or 'EW_GREEN' end

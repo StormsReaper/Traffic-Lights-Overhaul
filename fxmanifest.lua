@@ -4,11 +4,16 @@ lua54 'yes'
 
 name 'traffic-lights-overhaul'
 author 'Storms Technologies'
-description 'Realistic US-style traffic signal control with emergency vehicle preemption.'
-version '0.1.0'
+description 'Realistic US-style traffic signal control with adaptive traffic, emergency preemption, pedestrians, coordination, and time-of-day operation.'
+version '0.4.0'
 
 client_scripts {
     'config.lua',
+    'client/coordination.lua',
+    'client/features.lua',
+    'client/lane_analyzer.lua',
+    'client/traffic_ai.lua',
+    'client/debug.lua',
     'client/main.lua'
 }
 

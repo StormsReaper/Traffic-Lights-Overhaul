@@ -2,7 +2,7 @@ Config = {}
 
 Config.Debug = false
 Config.ScanInterval = 1500
-Config.SignalUpdateInterval = 250
+Config.SignalUpdateInterval = 100
 Config.IntersectionMergeDistance = 32.0
 Config.SignalSearchRadius = 45.0
 Config.IntersectionActivationRadius = 260.0
@@ -21,15 +21,26 @@ Config.Emergency = {
     LookAheadDot = 0.45,
     HoldAfterClear = 2.0,
     MaxHold = 35.0,
+    ScanInterval = 400,
     RequireSiren = true,
     RequireEmergencyClass = true,
-    Classes = {
-        [18] = true -- Emergency vehicles
-    }
+    Classes = { [18] = true }
 }
 
--- GTA traffic-light object models. The scanner discovers these locally and groups
--- nearby heads into intersections. Add models here if a server uses custom signal props.
+Config.NpcTraffic = {
+    Enabled = true,
+    ScanInterval = 250,
+    ControlRadius = 110.0,
+    DetectionRadius = 75.0,
+    IntersectionClearRadius = 12.0,
+    LookAheadDot = 0.55,
+    StopApproachSpeed = 4.0,
+    ReleaseSpeed = 16.0,
+    DrivingStyle = 786603,
+    StopAction = 6,
+    StopActionDuration = 900
+}
+
 Config.SignalModels = {
     'prop_traffic_01a',
     'prop_traffic_01b',
@@ -45,9 +56,4 @@ Config.SignalModels = {
     'prop_traffic_05'
 }
 
--- Optional fixed intersections. Automatic discovery is the default.
--- Example:
--- Config.Intersections = {
---     { coords = vector3(100.0, 200.0, 30.0), radius = 35.0 }
--- }
 Config.Intersections = {}

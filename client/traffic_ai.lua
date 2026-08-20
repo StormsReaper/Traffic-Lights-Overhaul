@@ -2,26 +2,14 @@ local TrafficAI = {}
 TrafficAI.states = {}
 
 local function distance(a, b) return #(a - b) end
-
-local function normalize(v)
-    local len = #v
-    if len < 0.001 then return vector3(0.0, 0.0, 0.0) end
-    return v / len
-end
-
-local function dot(a, b)
-    return a.x * b.x + a.y * b.y + a.z * b.z
-end
-
+local function normalize(v) local len = #v; if len < 0.001 then return vector3(0.0, 0.0, 0.0) end; return v / len end
+local function dot(a, b) return a.x * b.x + a.y * b.y + a.z * b.z end
 local function approach(center, coords)
     local dx, dy = coords.x - center.x, coords.y - center.y
     if math.abs(dy) >= math.abs(dx) then return dy >= 0 and 'NORTH' or 'SOUTH' end
     return dx >= 0 and 'EAST' or 'WEST'
 end
-
-local function axis(dir)
-    return (dir == 'NORTH' or dir == 'SOUTH') and 'NS' or 'EW'
-end
+local function axis(dir) return (dir == 'NORTH' or dir == 'SOUTH') and 'NS' or 'EW' end
 
 local function controlledVehicle(vehicle)
     if not DoesEntityExist(vehicle) or IsEntityDead(vehicle) then return false end
@@ -36,8 +24,7 @@ local function approaching(vehicle, center)
     local dist = #delta
     if dist > Config.NpcTraffic.DetectionRadius or dist < Config.NpcTraffic.IntersectionClearRadius then return false, dist end
     if GetEntitySpeed(vehicle) < 0.25 then return false, dist end
-    local forward = GetEntityForwardVector(vehicle)
-    return dot(forward, normalize(delta)) >= Config.NpcTraffic.LookAheadDot, dist
+    return dot(GetEntityForwardVector(vehicle), normalize(delta)) >= Config.NpcTraffic.LookAheadDot, dist
 end
 
 local function emergency(vehicle)
@@ -71,33 +58,31 @@ local function process(intersection, vehicle)
     if not valid then return end
     local isApproaching, dist = approaching(vehicle, intersection.center)
     if not isApproaching then return end
-
     local state = TrafficAI.states[vehicle]
     if not state then state = { stopped = false } TrafficAI.states[vehicle] = state end
-    state.lastSeen = GetGameTimer()
-    state.intersection = intersection.key
-    state.distance = dist
-
+    state.lastSeen = GetGameTimer(); state.intersection = intersection.key; state.distance = dist
     if TrafficAI.shouldStop(intersection, vehicle) then
-        stop(driver, vehicle)
-        state.stopped = true
+        stop(driver, vehicle); state.stopped = true
     elseif state.stopped then
-        release(driver)
-        state.stopped = false
+        release(driver); state.stopped = false
     end
 end
 
 function TrafficAI.update(intersection)
     if not Config.NpcTraffic.Enabled then return end
-    local playerCoords = GetEntityCoords(PlayerPedId())
-    if distance(playerCoords, intersection.center) > Config.NpcTraffic.ControlRadius then return end
-
+    if distance(GetEntityCoords(PlayerPedId()), intersection.center) > Config.NpcTraffic.ControlRadius then return end
     for _, vehicle in ipairs(GetGamePool('CVehicle')) do process(intersection, vehicle) end
-
-    local now = GetGameTimer()
-    for vehicle, state in pairs(TrafficAI.states) do
-        if now - (state.lastSeen or 0) > 5000 or not DoesEntityExist(vehicle) then TrafficAI.states[vehicle] = nil end
-    end
 end
 
-return TrafficAI
+_G.TLOTrafficAI = TrafficAI
+
+CreateThread(function()
+    while true do
+        if Config.NpcTraffic.Enabled and _G.TLOIntersections then
+            for _, intersection in pairs(_G.TLOIntersections) do
+                TrafficAI.update(intersection)
+            end
+        end
+        Wait(Config.NpcTraffic.ScanInterval)
+    end
+end)

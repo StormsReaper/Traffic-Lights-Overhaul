@@ -14,7 +14,20 @@ Config.Normal = {
     StartPhase = 'NS_GREEN'
 }
 
--- Adaptive timing extends or shortens the next green based on observed traffic.
+-- Lane/intersection analysis is the foundation for turn phases, accurate queues,
+-- pedestrian conflicts, and future corridor progression.
+Config.LaneAnalysis = {
+    Enabled = true,
+    UpdateInterval = 300,
+    DetectionDistance = 100.0,
+    IntersectionClearRadius = 10.0,
+    LaneWidth = 3.5,
+    MaxLanesPerApproach = 4,
+    ThroughAlignment = 0.82,
+    TurnThreshold = 0.28,
+    DebugIntersectionSize = 24.0
+}
+
 Config.Adaptive = {
     Enabled = true,
     MinimumGreen = 12.0,
@@ -30,7 +43,6 @@ Config.Adaptive = {
     RecomputeInterval = 1000
 }
 
--- Per-approach queue behavior.
 Config.Queues = {
     Enabled = true,
     MaxQueueVehicles = 16,
@@ -41,20 +53,19 @@ Config.Queues = {
     ClearInsideIntersection = true
 }
 
--- Turn movement support. GTA pathing is used as the final authority for where
--- the vehicle actually goes; these settings control signal permissions.
 Config.Turns = {
     Enabled = true,
     ProtectedLeft = true,
+    PermissiveLeft = true,
     PermissiveRight = true,
     RightOnRed = true,
     RightOnRedStopTime = 1.5,
     LeftTurnDetectionDistance = 42.0,
     ProtectedLeftDuration = 9.0,
+    LeftYellow = 3.0,
     FlashingYellowArrow = true
 }
 
--- Pedestrian phase requests. Disabled by default until a crossing is detected.
 Config.Pedestrians = {
     Enabled = true,
     DetectionRadius = 18.0,
@@ -66,7 +77,6 @@ Config.Pedestrians = {
     HoldTrafficForWalk = true
 }
 
--- Emergency preemption is strictly tied to emergency lighting when enabled.
 Config.Emergency = {
     Enabled = true,
     DetectionRadius = 180.0,
@@ -81,21 +91,19 @@ Config.Emergency = {
     Classes = { [18] = true }
 }
 
--- Coordinated corridors / green waves.
 Config.Coordination = {
     Enabled = true,
     DetectionRadius = 120.0,
     CorridorMaxDistance = 450.0,
-    TargetSpeed = 13.0, -- m/s, roughly 29 mph
+    TargetSpeed = 13.0,
     LookAheadDistance = 90.0,
     MaxOffsetCorrection = 8.0,
     SyncInterval = 2000,
     AllowEmergencyBreakout = true
 }
 
--- Time-of-day operation can be disabled completely. When enabled, each
--- period can have its own timing and optional flashing behavior.
 Config.TimeOfDay = {
+    -- Set false to completely disable time-of-day timing/flashing behavior.
     Enabled = false,
     UseGameClock = true,
     Day = { StartHour = 6, EndHour = 18, Green = 28.0, Yellow = 4.0, AllRed = 2.0, Flashing = false },
@@ -106,7 +114,6 @@ Config.TimeOfDay = {
     FlashInterval = 800
 }
 
--- Useful global safety/behavior controls.
 Config.Safety = {
     MinimumAllRed = 1.5,
     ClearIntersectionBeforePhaseChange = true,
